@@ -119,9 +119,46 @@ def health():
     return jsonify({"status": "ok", "beacon_id": config.BEACON_ID})
 
 
+def _print_startup_info():
+    """Print local IPs so the operator knows what URL to give victims."""
+    import socket
+    addrs = []
+    try:
+        # All network interfaces
+        for info in socket.getaddrinfo(socket.gethostname(), None):
+            ip = info[4][0]
+            if ip.startswith(("192.168.", "10.", "172.")) and ":" not in ip:
+                addrs.append(ip)
+    except Exception:
+        pass
+    if not addrs:
+        addrs = ["192.168.43.1"]  # Samsung hotspot default fallback
+
+    print("\n" + "=" * 52)
+    print("  RescueNet Node — Phase 1 ready")
+    print("=" * 52)
+    for ip in set(addrs):
+        print(f"  SOS page  → http://{ip}:{config.FLASK_PORT}/")
+        print(f"  Status    → http://{ip}:{config.FLASK_PORT}/status")
+    print(f"  Node ID   → {config.BEACON_ID}")
+    print(f"  Database  → {config.DB_PATH}")
+    hq = os.environ.get("HQ_URL", "")
+    if hq and hq != "http://localhost:8000":
+        print(f"  HQ sync   → {hq} (uploader active)")
+    else:
+        print("  HQ sync   → disabled (set HQ_URL to enable)")
+    print("=" * 52 + "\n")
+
+
 if __name__ == "__main__":
     storage.init_db()
-    uploader.start_background()
+    # Only start the HQ uploader when an explicit HQ_URL is configured.
+    # In Phase 1 (offline-only test) leave it dormant so there are no
+    # noisy connection errors in the logs.
+    hq_url = os.environ.get("HQ_URL", "")
+    if hq_url and hq_url != "http://localhost:8000":
+        uploader.start_background()
+    _print_startup_info()
     app.run(
         host=config.FLASK_HOST,
         port=config.FLASK_PORT,
