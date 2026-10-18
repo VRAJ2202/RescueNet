@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RescueNet HQ — Emergency Operations</title>
+<link rel="stylesheet" href="/static/vendor/leaflet.css">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;--surface:#161b22;--card:#1c2230;--border:#30363d;
+  --text:#e6edf3;--muted:#8b949e;--accent:#58a6ff;
+  --critical:#ff4444;--high:#ff8c00;--medium:#ffd700;--low:#3fb950;
+  --green:#3fb950;--blue:#58a6ff;--purple:#bc8cff;
+}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,"Segoe UI",system-ui,sans-serif;font-size:14px}
+/* Layout */
+.header{background:var(--surface);border-bottom:1px solid var(--border);
+  padding:12px 20px;display:flex;align-items:center;justify-content:space-between}
+.header h1{font-size:1.1rem;font-weight:800;color:var(--text)}
+.header h1 span{color:var(--critical)}
+.live-dot{width:8px;height:8px;border-radius:50%;background:var(--green);
+  display:inline-block;margin-right:6px;animation:blink 1.5s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.layout{display:grid;grid-template-columns:340px 1fr;height:calc(100vh - 50px)}
+.sidebar{background:var(--surface);border-right:1px solid var(--border);
+  overflow-y:auto;display:flex;flex-direction:column}
+.main{overflow:hidden;display:flex;flex-direction:column}
+/* Stats bar */
+.stats-bar{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
+  background:var(--border);border-bottom:1px solid var(--border)}
+.stat{background:var(--surface);padding:10px 16px;text-align:center}
+.stat .num{font-size:1.5rem;font-weight:800}
+.stat .lbl{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.critical-num{color:var(--critical)}
+.high-num{color:var(--high)}
+/* Map */
+#map{flex:1;min-height:300px}
+/* Sidebar sections */
+.s-header{padding:12px 16px;font-size:.75rem;font-weight:700;text-transform:uppercase;
+  letter-spacing:.5px;color:var(--muted);border-bottom:1px solid var(--border);
+  display:flex;justify-content:space-between;align-items:center}
+.incident-card{border-bottom:1px solid var(--border);padding:12px 16px;cursor:pointer;
+  transition:background .1s}
+.incident-card:hover{background:var(--card)}
+.incident-card.selected{background:#1d2840;border-left:3px solid var(--accent)}
+.sev-badge{display:inline-block;font-size:.65rem;font-weight:700;border-radius:4px;
+  padding:2px 6px;text-transform:uppercase;letter-spacing:.5px}
+.sev-CRITICAL{background:#ff44441a;color:var(--critical);border:1px solid var(--critical)}
+.sev-HIGH{background:#ff8c001a;color:var(--high);border:1px solid var(--high)}
+.sev-MEDIUM{background:#ffd7001a;color:var(--medium);border:1px solid var(--medium)}
+.sev-LOW{background:#3fb9501a;color:var(--low);border:1px solid var(--low)}
+.card-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.card-code{font-family:monospace;font-size:.9rem;font-weight:700;color:var(--accent)}
+.card-time{font-size:.7rem;color:var(--muted)}
+.card-loc{font-size:.8rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card-people{font-size:.8rem;margin-top:3px}
+.card-status{font-size:.75rem;color:var(--muted);margin-top:2px}
+/* Detail panel */
+.detail-panel{background:var(--card);border-top:1px solid var(--border);padding:16px;
+  display:none;max-height:320px;overflow-y:auto}
+.detail-panel.open{display:block}
+.detail-title{font-size:1rem;font-weight:700;margin-bottom:12px;
+  display:flex;align-items:center;gap:8px}
+.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.dg-item label{font-size:.7rem;color:var(--muted);display:block;margin-bottom:2px}
+.dg-item span{font-size:.85rem}
+.dg-full{grid-column:1/-1}
+.action-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.btn{padding:7px 14px;border:none;border-radius:6px;font-size:.8rem;font-weight:700;
+  cursor:pointer;transition:opacity .15s}
+.btn:hover{opacity:.85}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-ack{background:#1d3557;color:var(--accent);border:1px solid var(--accent)}
+.btn-assign{background:#1d3a2a;color:var(--green);border:1px solid var(--green)}
+.btn-call{background:#3d1d1d;color:var(--critical);border:1px solid var(--critical)}
+.btn-close{background:#2d2d2d;color:var(--muted);border:1px solid var(--border)}
+.summary-box{background:var(--bg);border:1px solid var(--border);border-radius:6px;
+  padding:10px;font-size:.8rem;color:var(--muted);margin-bottom:8px}
+/* Modal */
+.modal-overlay{display:none;position:fixed;inset:0;background:#0008;z-index:9999;
+  align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:var(--card);border:1px solid var(--border);border-radius:10px;
+  padding:24px;width:380px;max-width:95vw}
+.modal h3{margin-bottom:16px;font-size:1rem}
+.modal label{font-size:.8rem;color:var(--muted);display:block;margin-bottom:4px}
+.modal input{width:100%;background:var(--bg);border:1px solid var(--border);
+  border-radius:6px;color:var(--text);font-size:.9rem;padding:9px;margin-bottom:12px}
+.modal-btns{display:flex;gap:8px;justify-content:flex-end}
+/* Notify badge */
+.notify-badge{background:var(--critical);color:#fff;border-radius:10px;
+  font-size:.7rem;padding:2px 6px;margin-left:6px;display:none}
+.notify-badge.show{display:inline}
+/* Scrollbar */
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1><span>🆘</span> RescueNet HQ <span style="color:var(--muted);font-weight:400;font-size:.9rem">Emergency Operations</span></h1>
+  <div style="display:flex;align-items:center;gap:16px">
+    <span><span class="live-dot"></span><span style="font-size:.8rem;color:var(--muted)">Live</span></span>
+    <span id="lastRefresh" style="font-size:.75rem;color:var(--muted)"></span>
+    <span id="demoBadge" style="display:none;background:#ff44441a;border:1px solid var(--critical);
+      color:var(--critical);border-radius:4px;padding:2px 8px;font-size:.75rem">DEMO MODE</span>
+  </div>
+</div>
+
+<div class="layout">
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="stats-bar" id="statsBar">
+      <div class="stat"><div class="num critical-num" id="statCritical">—</div><div class="lbl">Critical</div></div>
+      <div class="stat"><div class="num high-num" id="statHigh">—</div><div class="lbl">High</div></div>
+      <div class="stat"><div class="num" id="statTotal">—</div><div class="lbl">Total SOS</div></div>
+      <div class="stat"><div class="num" id="statPeople">—</div><div class="lbl">People</div></div>
+    </div>
+    <div class="s-header">
+      <span>Incidents <span class="notify-badge" id="newBadge">NEW</span></span>
+      <span id="incidentCount" style="font-size:.8rem">0</span>
+    </div>
+    <div id="incidentList" style="flex:1;overflow-y:auto"></div>
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+    <div id="map"></div>
+    <div class="detail-panel" id="detailPanel">
+      <div class="detail-title">
+        <span id="detailCode" class="card-code"></span>
+        <span id="detailSev" class="sev-badge"></span>
+        <span id="detailStatus" style="font-size:.8rem;color:var(--muted)"></span>
+      </div>
+      <div class="summary-box" id="detailSummary"></div>
+      <div class="detail-grid" id="detailGrid"></div>
+      <div class="action-row" id="actionRow"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Assign Modal -->
+<div class="modal-overlay" id="assignModal">
+  <div class="modal">
+    <h3>Assign Rescue Team</h3>
+    <label>Team Name</label>
+    <input type="text" id="assignTeam" placeholder="e.g. Engine 23">
+    <label>ETA</label>
+    <input type="text" id="assignETA" placeholder="e.g. 15 minutes">
+    <div class="modal-btns">
+      <button class="btn btn-close" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-assign" onclick="confirmAssign()">Assign</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/vendor/leaflet.js"></script>
+<script>
+// ── Config ────────────────────────────────────────────────────────────────────
+const POLL_MS = 8000;
+const API = '';  // same origin
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let incidents = [];
+let selectedId = null;
+let markers = {};
+let isDemo = false;
+let lastCount = 0;
+
+// ── Map ───────────────────────────────────────────────────────────────────────
+const map = L.map('map').setView([34.02, -118.28], 11);  // LA default
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a>',
+  maxZoom: 19,
+}).addTo(map);
+
+// Fix Leaflet default icon path for bundled assets
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconUrl: '/static/vendor/images/marker-icon.png',
+  iconRetinaUrl: '/static/vendor/images/marker-icon-2x.png',
+  shadowUrl: '/static/vendor/images/marker-shadow.png',
+});
+
+const SEV_COLORS = { CRITICAL:'#ff4444', HIGH:'#ff8c00', MEDIUM:'#ffd700', LOW:'#3fb950' };
+
+function makeIcon(severity) {
+  const color = SEV_COLORS[severity] || '#888';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="40" viewBox="0 0 28 40">
+    <path d="M14 0C6.3 0 0 6.3 0 14c0 10.5 14 26 14 26S28 24.5 28 14C28 6.3 21.7 0 14 0z" fill="${color}"/>
+    <circle cx="14" cy="14" r="7" fill="white" opacity="0.9"/>
+  </svg>`;
+  return L.divIcon({
+    html: svg, className: '', iconSize:[28,40], iconAnchor:[14,40], popupAnchor:[0,-40]
+  });
+}
+
+// ── Fetch helpers ─────────────────────────────────────────────────────────────
+async function apiFetch(path, opts={}) {
+  const r = await fetch(API + path, opts);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+// ── Data refresh ──────────────────────────────────────────────────────────────
+async function refresh() {
+  try {
+    const [data, stats, cfg] = await Promise.all([
+      apiFetch('/api/v1/incidents'),
+      apiFetch('/api/v1/stats'),
+      apiFetch('/api/v1/config'),
+    ]);
+    isDemo = cfg.demo_mode;
+    document.getElementById('demoBadge').style.display = isDemo ? '' : 'none';
+    updateStats(stats);
+    updateIncidents(data.incidents || []);
+    document.getElementById('lastRefresh').textContent =
+      'Updated ' + new Date().toLocaleTimeString();
+  } catch(e) {
+    console.warn('Refresh error:', e);
+  }
+}
+
+function updateStats(s) {
+  document.getElementById('statCritical').textContent = s.critical ?? '—';
+  document.getElementById('statHigh').textContent = s.high ?? '—';
+  document.getElementById('statTotal').textContent = s.total ?? '—';
+  document.getElementById('statPeople').textContent = s.people_needing_help ?? '—';
+}
+
+function updateIncidents(data) {
+  // Show new badge
+  if (data.length > lastCount && lastCount > 0) {
+    const nb = document.getElementById('newBadge');
+    nb.classList.add('show');
+    setTimeout(() => nb.classList.remove('show'), 5000);
+  }
+  lastCount = data.length;
+  incidents = data;
+
+  // Sort: severity then time
+  const sevOrd = {CRITICAL:0,HIGH:1,MEDIUM:2,LOW:3};
+  incidents.sort((a,b) => (sevOrd[a.severity]||9)-(sevOrd[b.severity]||9) || b.received_at-a.received_at);
+
+  document.getElementById('incidentCount').textContent = incidents.length;
+  renderList();
+  updateMap();
+  if (selectedId) {
+    const sel = incidents.find(i => i.message_id === selectedId);
+    if (sel) renderDetail(sel);
+  }
+}
+
+// ── List rendering ────────────────────────────────────────────────────────────
+function renderList() {
+  const el = document.getElementById('incidentList');
+  if (!incidents.length) {
+    el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted)">No incidents yet</div>';
+    return;
+  }
+  el.innerHTML = incidents.map(inc => `
+    <div class="incident-card ${inc.message_id === selectedId ? 'selected' : ''}"
+         onclick="selectIncident('${inc.message_id}')">
+      <div class="card-top">
+        <span class="card-code">${inc.message_id.slice(0,8)}</span>
+        <span class="sev-badge sev-${inc.severity}">${inc.severity}</span>
+        <span class="card-time">${fmtTime(inc.received_at)}</span>
+      </div>
+      <div class="card-loc">${esc(inc.landmark)}</div>
+      <div class="card-people">${inc.people} people · ${inc.injured} injured · <strong>${esc(inc.status)}</strong></div>
+      <div class="card-status">${dispatchBadge(inc.dispatch_status)}</div>
+    </div>
+  `).join('');
+}
+
+function dispatchBadge(ds) {
+  const map_ = {
+    pending: '<span style="color:var(--muted)">⌛ Pending review</span>',
+    acknowledged: '<span style="color:var(--blue)">👁 Acknowledged</span>',
+    assigned: '<span style="color:var(--green)">🚒 Team assigned</span>',
+    closed: '<span style="color:var(--muted)">✓ Closed</span>',
+  };
+  return map_[ds] || ds;
+}
+
+// ── Map rendering ─────────────────────────────────────────────────────────────
+function updateMap() {
+  const current = new Set(incidents.map(i => i.message_id));
+  // Remove stale
+  for (const id in markers) {
+    if (!current.has(id)) { markers[id].remove(); delete markers[id]; }
+  }
+  for (const inc of incidents) {
+    if (!inc.beacon_lat || !inc.beacon_lon) continue;
+    if (markers[inc.message_id]) {
+      markers[inc.message_id].setIcon(makeIcon(inc.severity));
+    } else {
+      const m = L.marker([inc.beacon_lat, inc.beacon_lon], {icon: makeIcon(inc.severity)})
+        .addTo(map)
+        .bindPopup(popupHtml(inc));
+      m.on('click', () => selectIncident(inc.message_id));
+      markers[inc.message_id] = m;
+    }
+  }
+  // Fit bounds if markers exist
+  const pts = incidents.filter(i => i.beacon_lat && i.beacon_lon)
+    .map(i => [i.beacon_lat, i.beacon_lon]);
+  if (pts.length) {
+    try { map.fitBounds(pts, {maxZoom:14, padding:[30,30]}); } catch(e){}
+  }
+}
+
+function popupHtml(inc) {
+  return `<div style="min-width:200px;font-size:13px">
+    <b>${esc(inc.status.toUpperCase())}</b> <span class="sev-badge sev-${inc.severity}">${inc.severity}</span><br>
+    📍 <em style="font-size:11px">Approximate — beacon location</em><br>
+    <b>${inc.people}</b> people · <b>${inc.injured}</b> injured<br>
+    ${esc(inc.landmark)}<br>
+    <span style="font-size:11px;color:#888">${fmtTime(inc.received_at)}</span>
+  </div>`;
+}
+
+// ── Detail panel ──────────────────────────────────────────────────────────────
+function selectIncident(id) {
+  selectedId = id;
+  renderList();
+  const inc = incidents.find(i => i.message_id === id);
+  if (inc) renderDetail(inc);
+}
+
+function renderDetail(inc) {
+  const panel = document.getElementById('detailPanel');
+  panel.classList.add('open');
+  document.getElementById('detailCode').textContent = inc.message_id.slice(0,8);
+  const sev = document.getElementById('detailSev');
+  sev.textContent = inc.severity;
+  sev.className = `sev-badge sev-${inc.severity}`;
+  document.getElementById('detailStatus').textContent = `· ${inc.dispatch_status}`;
+  document.getElementById('detailSummary').textContent =
+    inc.summary || 'No AI summary — rule triage used.';
+
+  const grid = document.getElementById('detailGrid');
+  grid.innerHTML = `
+    <div class="dg-item"><label>Status</label><span>${esc(inc.status)}</span></div>
+    <div class="dg-item"><label>People / Injured</label><span>${inc.people} / ${inc.injured}</span></div>
+    <div class="dg-item dg-full"><label>Location (approximate)</label><span>${esc(inc.landmark)}</span></div>
+    ${inc.special_needs ? `<div class="dg-item dg-full"><label>Special needs</label><span>${esc(inc.special_needs)}</span></div>` : ''}
+    ${inc.notes ? `<div class="dg-item dg-full"><label>Notes</label><span>${esc(inc.notes)}</span></div>` : ''}
+    ${inc.assigned_team ? `<div class="dg-item"><label>Rescue Team</label><span style="color:var(--green)">${esc(inc.assigned_team)}</span></div>` : ''}
+    ${inc.eta ? `<div class="dg-item"><label>ETA</label><span>${esc(inc.eta)}</span></div>` : ''}
+    <div class="dg-item"><label>Beacon</label><span style="font-size:.75rem">${esc(inc.beacon_id)}</span></div>
+    <div class="dg-item"><label>Received</label><span>${fmtTime(inc.received_at)}</span></div>
+  `;
+
+  const ds = inc.dispatch_status;
+  document.getElementById('actionRow').innerHTML = `
+    ${ds==='pending' ? `<button class="btn btn-ack" onclick="doAck('${inc.message_id}')">✓ Acknowledge</button>` : ''}
+    ${ds!=='closed' ? `<button class="btn btn-assign" onclick="openAssign('${inc.message_id}')">🚒 Assign Team</button>` : ''}
+    <button class="btn btn-call" onclick="doCall('${inc.message_id}')">📞 Notify Call${isDemo?' (demo)':''}</button>
+    ${ds!=='closed' ? `<button class="btn btn-close" onclick="doClose('${inc.message_id}')">✓ Close</button>` : ''}
+  `;
+}
+
+// ── Dispatcher actions ────────────────────────────────────────────────────────
+async function doAck(id) {
+  try {
+    await apiFetch(`/api/v1/incidents/${id}/ack`, {method:'POST'});
+    refresh();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+let _assignTarget = null;
+function openAssign(id) {
+  _assignTarget = id;
+  document.getElementById('assignTeam').value = '';
+  document.getElementById('assignETA').value = '';
+  document.getElementById('assignModal').classList.add('open');
+  setTimeout(() => document.getElementById('assignTeam').focus(), 100);
+}
+function closeModal() {
+  document.getElementById('assignModal').classList.remove('open');
+  _assignTarget = null;
+}
+async function confirmAssign() {
+  const team = document.getElementById('assignTeam').value.trim();
+  const eta = document.getElementById('assignETA').value.trim();
+  if (!team) { alert('Team name required'); return; }
+  try {
+    await apiFetch(`/api/v1/incidents/${_assignTarget}/assign`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({team, eta}),
+    });
+    closeModal();
+    refresh();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function doCall(id) {
+  try {
+    const r = await apiFetch(`/api/v1/incidents/${id}/call`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'
+    });
+    const msg = r.simulated ? '📞 Simulated call (demo mode)' :
+                r.success ? `📞 Call initiated: ${r.call_id}` : `Call failed: ${r.error}`;
+    alert(msg);
+    refresh();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function doClose(id) {
+  if (!confirm('Mark this incident as rescued / closed?')) return;
+  try {
+    await apiFetch(`/api/v1/incidents/${id}/close`, {method:'POST'});
+    refresh();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+// ── Utility ───────────────────────────────────────────────────────────────────
+function fmtTime(ts) {
+  if (!ts) return '';
+  return new Date(ts * 1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+}
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+refresh();
+setInterval(refresh, POLL_MS);
+</script>
+</body>
+</html>

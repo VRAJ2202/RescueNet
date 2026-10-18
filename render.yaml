@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: rescuenet-hq
+    runtime: python
+    buildCommand: pip install -r hq/requirements.txt
+    startCommand: uvicorn hq.main:app --host 0.0.0.0 --port $PORT
+    plan: free
+    envVars:
+      - key: HQ_DB
+        value: /data/hq.db
+      - key: DEMO_MODE
+        value: "true"
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: RETELL_API_KEY
+        sync: false
+      - key: RETELL_AGENT_ID
+        sync: false
+      - key: RETELL_FROM_NUMBER
+        sync: false
+      - key: RETELL_NOTIFY_NUMBER
+        sync: false
+    disk:
+      name: hq-data
+      mountPath: /data
+      sizeGB: 1

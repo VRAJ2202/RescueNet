@@ -1,0 +1,13 @@
+# Rename this file to .gitignore
+.env
+*.db
+*.pyc
+__pycache__/
+.DS_Store
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+sim/out/*.png
+*.log
